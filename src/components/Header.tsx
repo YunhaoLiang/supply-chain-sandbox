@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/store/gameStore";
 import { SUPPLY_CHAIN_ORDER, getTotalCost } from "@/engine/types";
@@ -24,16 +25,18 @@ export default function Header() {
       className="w-full px-6 py-2.5 flex items-center gap-5"
       style={{ background: "#FFFDF7", borderBottom: "2px solid #e0ddd5" }}
     >
-      {/* Logo & title */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#4ECDC4] to-[#45B7D1] flex items-center justify-center shadow-sm">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path d="M3 7l9-4 9 4-9 4-9-4z" fill="white" opacity={0.9} />
-            <path d="M3 12l9 4 9-4" stroke="white" strokeWidth="2" fill="none" opacity={0.7} />
-            <path d="M3 17l9 4 9-4" stroke="white" strokeWidth="2" fill="none" opacity={0.5} />
-          </svg>
+      {/* HKU logo & title */}
+      <div className="flex items-center gap-3 shrink-0 min-w-0">
+        <div className="relative h-12 w-[230px] max-w-[44vw] overflow-hidden shrink-0">
+          <Image
+            src="/hku-logo.png"
+            alt="The University of Hong Kong"
+            fill
+            className="object-cover object-left scale-125"
+            priority
+          />
         </div>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-sm font-bold text-gray-800 leading-tight">
             Supply Chain Sandbox
           </h1>
