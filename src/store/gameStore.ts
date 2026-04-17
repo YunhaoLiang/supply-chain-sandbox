@@ -176,10 +176,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const cached = getWeekRecord(scenarioType, nextWeek);
     const customerDemand = cached ? cached.customerDemand : sc.getDemand(nextWeek);
 
-    // When replaying from cache we still animate, but faster so the
-    // teacher gets a smooth demo without waiting on API latency.
-    const thinkDelay = cached ? 120 : 300;
-    const decidedDelay = cached ? 320 : 800;
+    // Replay speed: ~2.5s thinking + ~4s decided ≈ 6-7s per node.
+    // Non-cached (live API) keeps same rhythm for consistency.
+    const thinkDelay = 2500;
+    const decidedDelay = 4000;
 
     interface MidResult {
       arriving: number;
