@@ -10,22 +10,39 @@ import {
 } from "./types";
 
 /**
- * Base-Stock (Order-Up-To) Policy
+ * (s, S) Policy
+ *
+ *   s = reorder point  (库存水位跌破 s 才下单)
+ *   S = order-up-to    (下单时一次补到 S)
+ *
+ * 这里选 s=16、S=24：2周前置期 × 8单/周 = 16（刚好覆盖在途），
+ * 额外 8 单作为安全库存缓冲。
  */
-function baseStockPolicy(state: NodeState, ctx: GameContext): PolicyDecision {
+function ssPolicy(state: NodeState, ctx: GameContext): PolicyDecision {
   void ctx;
   const { onHand, backlog } = state;
   const pipelineInv = getPipelineInventory(state);
-  const targetLevel = 24;
+  const s = 16;
+  const S = 24;
 
   const inventoryPosition = onHand - backlog + pipelineInv;
-  const order = Math.max(0, Math.round(targetLevel - inventoryPosition));
 
-  const explanation =
-    `库存水位 = ${onHand}(在手) - ${backlog}(欠单) + ${pipelineInv}(在途) = ${inventoryPosition}，` +
-    `目标水位 ${targetLevel}，下单 ${order}`;
+  if (inventoryPosition >= s) {
+    return {
+      orderQty: 0,
+      explanation:
+        `库存水位 = ${onHand}(在手) - ${backlog}(欠单) + ${pipelineInv}(在途) = ${inventoryPosition}，` +
+        `未跌破再订货点 s=${s}，不下单`,
+    };
+  }
 
-  return { orderQty: order, explanation };
+  const order = Math.max(0, Math.round(S - inventoryPosition));
+  return {
+    orderQty: order,
+    explanation:
+      `库存水位 = ${onHand}(在手) - ${backlog}(欠单) + ${pipelineInv}(在途) = ${inventoryPosition}，` +
+      `跌破 s=${s}，补到 S=${S}，下单 ${order}`,
+  };
 }
 
 /**
@@ -60,9 +77,9 @@ export async function llmPolicy(
   });
 
   if (!resp.ok) {
-    const fallback = baseStockPolicy(state, ctx);
+    const fallback = ssPolicy(state, ctx);
     return {
-      thinking: "API 调用失败，回退到基准库存策略",
+      thinking: "API 调用失败，回退到 (s,S) 策略",
       orderQty: fallback.orderQty,
       explanation: `[回退] ${fallback.explanation}`,
     };
@@ -79,15 +96,15 @@ export async function llmPolicy(
 export function getPolicy(type: PolicyType): PolicyFn {
   switch (type) {
     case "base_stock":
-      return baseStockPolicy;
+      return ssPolicy;
     case "llm":
-      return baseStockPolicy;
+      return ssPolicy;
     default:
-      return baseStockPolicy;
+      return ssPolicy;
   }
 }
 
 export const POLICY_LABELS: Record<PolicyType, string> = {
-  base_stock: "基准库存策略",
+  base_stock: "(s,S) 策略",
   llm: "AI决策",
 };
