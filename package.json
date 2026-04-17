@@ -7,7 +7,8 @@
     "dev:turbo": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "gen-llm-cache": "node scripts/generate-llm-cache.mjs"
   },
   "dependencies": {
     "next": "^15.3.0",

@@ -17,6 +17,11 @@ import {
 import { createInitialNodes, simulateStep } from "@/engine/simulation";
 import { getPolicy, llmPolicy } from "@/engine/policies";
 import { getScenarioConfig } from "@/engine/scenarios";
+import {
+  getWeekRecord,
+  saveWeekRecord,
+  LLMWeekRecord,
+} from "@/engine/llmCache";
 
 export type SpeedMultiplier = 0.5 | 1 | 2 | 4;
 
@@ -163,9 +168,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     const sc = getScenarioConfig(state.config.scenario);
-    const customerDemand = sc.getDemand(nextWeek);
+    const scenarioType = state.config.scenario;
     const chain = SUPPLY_CHAIN_ORDER;
     const currentNodes = { ...state.nodes };
+
+    // Cache lookup for this week
+    const cached = getWeekRecord(scenarioType, nextWeek);
+    const customerDemand = cached ? cached.customerDemand : sc.getDemand(nextWeek);
+
+    // When replaying from cache we still animate, but faster so the
+    // teacher gets a smooth demo without waiting on API latency.
+    const thinkDelay = cached ? 120 : 300;
+    const decidedDelay = cached ? 320 : 800;
 
     interface MidResult {
       arriving: number;
@@ -178,6 +192,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       pipelineAfterArrival: number[];
     }
     const mid: Partial<Record<NodeRole, MidResult>> = {};
+    const newDecisions: Record<NodeRole, { orderQty: number; thinking: string; explanation: string }> =
+      {} as Record<NodeRole, { orderQty: number; thinking: string; explanation: string }>;
 
     for (let i = 0; i < chain.length; i++) {
       const role = chain[i];
@@ -211,32 +227,49 @@ export const useGameStore = create<GameStore>((set, get) => ({
         selectedNode: role,
       });
 
-      await sleep(300);
+      await sleep(thinkDelay);
 
-      // 4. Call LLM
-      const stateForPolicy: NodeState = {
-        role,
-        onHand,
-        backlog,
-        lastOrderPlaced: prev.lastOrderPlaced,
-        lastIncomingOrder: prev.lastIncomingOrder,
-        holdingCostAccum: prev.holdingCostAccum,
-        backorderCostAccum: prev.backorderCostAccum,
-        shipmentPipeline: pipeline,
+      // 4. Either replay from cache or call LLM
+      let llmResult: { orderQty: number; thinking: string; explanation: string };
+
+      const cachedDecision = cached?.decisions[role];
+      if (cachedDecision) {
+        llmResult = {
+          orderQty: cachedDecision.orderQty,
+          thinking: cachedDecision.thinking,
+          explanation: cachedDecision.explanation,
+        };
+      } else {
+        const stateForPolicy: NodeState = {
+          role,
+          onHand,
+          backlog,
+          lastOrderPlaced: prev.lastOrderPlaced,
+          lastIncomingOrder: prev.lastIncomingOrder,
+          holdingCostAccum: prev.holdingCostAccum,
+          backorderCostAccum: prev.backorderCostAccum,
+          shipmentPipeline: pipeline,
+        };
+
+        const ctx: GameContext = {
+          week: nextWeek,
+          customerDemand,
+          incomingOrder,
+          demandHistory: state.demandHistory,
+          sharedDemand: state.config.sharedDemand,
+          sharedInventory: state.config.sharedInventory,
+          downstreamInventory:
+            i > 0 ? mid[chain[i - 1]]!.onHand : undefined,
+        };
+
+        llmResult = await llmPolicy(stateForPolicy, ctx);
+      }
+
+      newDecisions[role] = {
+        orderQty: llmResult.orderQty,
+        thinking: llmResult.thinking,
+        explanation: llmResult.explanation,
       };
-
-      const ctx: GameContext = {
-        week: nextWeek,
-        customerDemand,
-        incomingOrder,
-        demandHistory: state.demandHistory,
-        sharedDemand: state.config.sharedDemand,
-        sharedInventory: state.config.sharedInventory,
-        downstreamInventory:
-          i > 0 ? mid[chain[i - 1]]!.onHand : undefined,
-      };
-
-      const llmResult = await llmPolicy(stateForPolicy, ctx);
 
       // Show "decided" bubble with thinking + decision
       set({
@@ -248,7 +281,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
       });
 
-      await sleep(800);
+      await sleep(decidedDelay);
 
       mid[role] = {
         arriving,
@@ -260,6 +293,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
         thinking: llmResult.thinking,
         pipelineAfterArrival: pipeline,
       };
+    }
+
+    // Persist this week's run so future replays skip the API entirely
+    if (!cached) {
+      const record: LLMWeekRecord = {
+        week: nextWeek,
+        customerDemand,
+        decisions: newDecisions,
+      };
+      saveWeekRecord(scenarioType, record);
     }
 
     // Pass 2: build new states
